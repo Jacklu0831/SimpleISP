@@ -375,8 +375,6 @@ def apply_gamma(x):
 def apply_tone_map(x):
     tone_curve = loadmat(os.path.join(os.path.dirname(os.path.realpath(__file__)), 'tone_curve.mat'))
     tone_curve = tone_curve['tc']
-    import pdb;pdb.set_trace()
     x = np.round(x * (len(tone_curve) - 1)).astype(int)
     tone_mapped_image = np.squeeze(tone_curve[x])
     return tone_mapped_image
-
