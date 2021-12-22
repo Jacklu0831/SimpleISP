@@ -196,37 +196,7 @@ def lens_shading_correction(raw_image, gain_map_opcode, bayer_pattern, gain_map=
     if len(gain_map.shape) == 2:
         gain_map = np.tile(gain_map[..., np.newaxis], [1, 1, 4])
 
-    if gain_map_opcode:
-        # TODO: consider other parameters
-
-        top = gain_map_opcode.data['top']
-        left = gain_map_opcode.data['left']
-        bottom = gain_map_opcode.data['bottom']
-        right = gain_map_opcode.data['right']
-        rp = gain_map_opcode.data['row_pitch']
-        cp = gain_map_opcode.data['col_pitch']
-
-        gm_w = right - left
-        gm_h = bottom - top
-
-        # gain_map = cv2.resize(gain_map, dsize=(gm_w, gm_h), interpolation=cv2.INTER_LINEAR)
-
-        # TODO
-        # if top > 0:
-        #     pass
-        # elif left > 0:
-        #     left_col = gain_map[:, 0:1]
-        #     rep_left_col = np.tile(left_col, [1, left])
-        #     gain_map = np.concatenate([rep_left_col, gain_map], axis=1)
-        # elif bottom < raw_image.shape[0]:
-        #     pass
-        # elif right < raw_image.shape[1]:
-        #     pass
-
     result_image = raw_image.copy()
-
-    # one channel
-    # result_image[::rp, ::cp] *= gain_map[::rp, ::cp]
 
     # per bayer channel
     upper_left_idx = [[0, 0], [0, 1], [1, 0], [1, 1]]
@@ -310,7 +280,6 @@ def demosaic(white_balanced_image, cfa_pattern, output_channel_order='BGR', alg_
     else:
         max_val = 16383
         wb_image = (white_balanced_image * max_val).astype(dtype=np.uint16)
-
     if alg_type in ['', 'EA', 'VNG']:
         opencv_demosaic_flag = get_opencv_demsaic_flag(cfa_pattern, output_channel_order, alg_type=alg_type)
         demosaiced_image = cv2.cvtColor(wb_image, opencv_demosaic_flag)
@@ -323,20 +292,14 @@ def demosaic(white_balanced_image, cfa_pattern, output_channel_order='BGR', alg_
     return demosaiced_image
 
 
-def apply_color_space_transform(demosaiced_image, color_matrix_1, color_matrix_2):
+def apply_color_space_transform(demosaiced_image, color_matrix_1):
     if type(color_matrix_1[0]) is Ratio:
         color_matrix_1 = ratios2floats(color_matrix_1)
-    if type(color_matrix_2[0]) is Ratio:
-        color_matrix_2 = ratios2floats(color_matrix_2)
+
     xyz2cam1 = np.reshape(np.asarray(color_matrix_1), (3, 3))
-    xyz2cam2 = np.reshape(np.asarray(color_matrix_2), (3, 3))
-    # normalize rows (needed?)
-    xyz2cam1 = xyz2cam1 / np.sum(xyz2cam1, axis=1, keepdims=True)
-    xyz2cam2 = xyz2cam2 / np.sum(xyz2cam1, axis=1, keepdims=True)
-    # inverse
-    cam2xyz1 = np.linalg.inv(xyz2cam1)
-    cam2xyz2 = np.linalg.inv(xyz2cam2)
-    # for now, use one matrix  # TODO: interpolate btween both
+    xyz2cam1 = xyz2cam1 / np.sum(xyz2cam1, axis=1, keepdims=True) # normalize rows
+    cam2xyz1 = np.linalg.inv(xyz2cam1) # inverse
+
     # simplified matrix multiplication
     xyz_image = cam2xyz1[np.newaxis, np.newaxis, :, :] * demosaiced_image[:, :, np.newaxis, :]
     xyz_image = np.sum(xyz_image, axis=-1)
@@ -345,19 +308,12 @@ def apply_color_space_transform(demosaiced_image, color_matrix_1, color_matrix_2
 
 
 def transform_xyz_to_srgb(xyz_image):
-    # srgb2xyz = np.array([[0.4124564, 0.3575761, 0.1804375],
-    #                      [0.2126729, 0.7151522, 0.0721750],
-    #                      [0.0193339, 0.1191920, 0.9503041]])
-
-    # xyz2srgb = np.linalg.inv(srgb2xyz)
-
     xyz2srgb = np.array([[3.2404542, -1.5371385, -0.4985314],
                          [-0.9692660, 1.8760108, 0.0415560],
                          [0.0556434, -0.2040259, 1.0572252]])
+    xyz2srgb = xyz2srgb / np.sum(xyz2srgb, axis=-1, keepdims=True) # normalize
 
-    # normalize rows (needed?)
-    xyz2srgb = xyz2srgb / np.sum(xyz2srgb, axis=-1, keepdims=True)
-
+    # simplified matrix multiplication
     srgb_image = xyz2srgb[np.newaxis, np.newaxis, :, :] * xyz_image[:, :, np.newaxis, :]
     srgb_image = np.sum(srgb_image, axis=-1)
     srgb_image = np.clip(srgb_image, 0.0, 1.0)
@@ -417,29 +373,10 @@ def apply_gamma(x):
 
 
 def apply_tone_map(x):
-    # simple tone curve
-    # return 3 * x ** 2 - 2 * x ** 3
-
-    # tone_curve = loadmat('tone_curve.mat')
     tone_curve = loadmat(os.path.join(os.path.dirname(os.path.realpath(__file__)), 'tone_curve.mat'))
     tone_curve = tone_curve['tc']
+    import pdb;pdb.set_trace()
     x = np.round(x * (len(tone_curve) - 1)).astype(int)
     tone_mapped_image = np.squeeze(tone_curve[x])
     return tone_mapped_image
 
-
-def raw_rgb_to_cct(rawRgb, xyz2cam1, xyz2cam2):
-    """Convert raw-RGB triplet to corresponding correlated color temperature (CCT)"""
-    pass
-    # pxyz = [.5, 1, .5]
-    # loss = 1e10
-    # k = 1
-    # while loss > 1e-4:
-    #     cct = XyzToCct(pxyz)
-    #     xyz = RawRgbToXyz(rawRgb, cct, xyz2cam1, xyz2cam2)
-    #     loss = norm(xyz - pxyz)
-    #     pxyz = xyz
-    #     fprintf('k = %d, loss = %f\n', [k, loss])
-    #     k = k + 1
-    # end
-    # temp = cct
